@@ -1,10 +1,10 @@
-ARG ROS_DISTRO=humble
+ARG ROS_DISTRO=jazzy
 FROM ros:${ROS_DISTRO} AS deps
 
 # Create ros2_ws and copy files
 WORKDIR /root/ros2_ws
 SHELL ["/bin/bash", "-c"]
-COPY . /root/ros2_ws/src
+# COPY . /root/ros2_ws/src
 
 # Install dependencies
 RUN apt-get update \
@@ -12,8 +12,12 @@ RUN apt-get update \
     gcc \
     git \
     python3 \
-    python3-pip
-RUN pip3 install -r src/requirements.txt
+    python3-pip \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-compressed-image-transport \
+    ros-jazzy-image-publisher
+COPY . /root/ros2_ws/src
+RUN pip3 install -r src/requirements.txt --break-system-packages
 RUN rosdep install --from-paths src --ignore-src -r -y
 
 # Colcon the ws
