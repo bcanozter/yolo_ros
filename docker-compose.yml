@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  bytetrack:
+    build: ./
+    devices:
+      - /dev/video0:/dev/video0
+    environment:
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    volumes:
+      - .:/root/ros2_ws/src
+    privileged: true
+    tty: true
+    stdin_open: true
+    network_mode: host
+    ipc: host
+    command: tail -f /dev/null
