@@ -328,7 +328,8 @@ class YoloNode(LifecycleNode):
             # convert image + predict
             cv_image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
             cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-            results = self.yolo.predict(
+            results = self.yolo.track(
+                persist=True,
                 source=cv_image,
                 verbose=False,
                 stream=False,
