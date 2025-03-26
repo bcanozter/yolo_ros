@@ -7,8 +7,11 @@ services:
       - /dev/video0:/dev/video0
     environment:
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - NVIDIA_VISIBLE_DEVICES=nvidia.com/gpu=all
     volumes:
       - .:/root/ros2_ws/src
+      - /dev/dri:/dev/dri
+    runtime: nvidia
     privileged: true
     tty: true
     stdin_open: true

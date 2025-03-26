@@ -3,3 +3,5 @@ opencv-python>=4.8.1.78
 typing-extensions>=4.4.0
 ultralytics==8.3.91
 lap==0.5.12
+empy==3.3.4
+lark==1.2.2
