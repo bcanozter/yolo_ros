@@ -34,7 +34,7 @@ from ultralytics.trackers import BOTSORT, BYTETracker
 from ultralytics.utils import IterableSimpleNamespace, yaml_load
 from ultralytics.utils.checks import check_requirements, check_yaml
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from yolo_msgs.msg import Detection
 from yolo_msgs.msg import DetectionArray
 
@@ -47,14 +47,14 @@ class TrackingNode(LifecycleNode):
         # params
         self.declare_parameter("tracker", "bytetrack.yaml")
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
-
+        self.declare_parameter('is_compressed', False)
         self.cv_bridge = CvBridge()
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
 
         tracker_name = self.get_parameter("tracker").get_parameter_value().string_value
-
+        self.is_compressed = self.get_parameter('is_compressed').get_parameter_value().bool_value
         self.image_reliability = (
             self.get_parameter("image_reliability").get_parameter_value().integer_value
         )
@@ -70,7 +70,7 @@ class TrackingNode(LifecycleNode):
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Activating...")
 
-        image_qos_profile = QoSProfile(
+        self.image_qos_profile = QoSProfile(
             reliability=self.image_reliability,
             history=QoSHistoryPolicy.KEEP_LAST,
             durability=QoSDurabilityPolicy.VOLATILE,
@@ -78,15 +78,16 @@ class TrackingNode(LifecycleNode):
         )
 
         # subs
-        image_sub = message_filters.Subscriber(
-            self, Image, "image_raw", qos_profile=image_qos_profile
+        self.image_sub = message_filters.Subscriber(
+            self, CompressedImage if self.is_compressed else Image, "image_raw",
+            qos_profile=self.image_qos_profile
         )
-        detections_sub = message_filters.Subscriber(
+        self.detections_sub = message_filters.Subscriber(
             self, DetectionArray, "detections", qos_profile=10
         )
 
         self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (image_sub, detections_sub), 10, 0.5
+            (self.image_sub, self.detections_sub), 10, 0.5
         )
         self._synchronizer.registerCallback(self.detections_cb)
 
@@ -140,20 +141,25 @@ class TrackingNode(LifecycleNode):
         tracker = TRACKER_MAP[cfg.tracker_type](args=cfg, frame_rate=1)
         return tracker
 
-    def detections_cb(self, img_msg: Image, detections_msg: DetectionArray) -> None:
-
+    def detections_cb(self, img_msg, detections_msg: DetectionArray) -> None:
         tracked_detections_msg = DetectionArray()
         tracked_detections_msg.header = img_msg.header
 
         # convert image
-        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
-        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        if self.is_compressed:
+            np_arr = np.frombuffer(img_msg.data, np.uint8)
+            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            del np_arr
+            # Get height and width from the decoded image
+            img_height, img_width = cv_image.shape[:2]  # height, width
+        else:
+            cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, 'bgr8')
+            img_height, img_width = cv_image.shape[:2]  # height, width
 
         # parse detections
         detection_list = []
         detection: Detection
         for detection in detections_msg.detections:
-
             detection_list.append(
                 [
                     detection.bbox.center.position.x - detection.bbox.size.x / 2,
@@ -167,15 +173,12 @@ class TrackingNode(LifecycleNode):
 
         # tracking
         if len(detection_list) > 0:
-
-            det = Boxes(np.array(detection_list), (img_msg.height, img_msg.width))
+            det = Boxes(np.array(detection_list), (img_height, img_width))  # Use img_height and img_width
             tracks = self.tracker.update(det, cv_image)
 
             if len(tracks) > 0:
-
                 for t in tracks:
-
-                    tracked_box = Boxes(t[:-1], (img_msg.height, img_msg.width))
+                    tracked_box = Boxes(t[:-1], (img_height, img_width))  # Use img_height and img_width
                     tracked_detection: Detection = detections_msg.detections[int(t[-1])]
 
                     # get boxes values

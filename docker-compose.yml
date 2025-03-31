@@ -1,21 +1,28 @@
 version: '3.8'
 
 services:
-    cuda:
-      build:
-        context: .
-      command: tail -f /dev/null
-      environment:
-        RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
-        NVIDIA_VISIBLE_DEVICES: nvidia.com/gpu=all
-      volumes:
-        - .:/root/ros2_ws/src
-        - /dev/dri:/dev/dri
-      devices:
-        # Provide access to GPU devices (supports non-NVIDIA GPUs)
-        - /dev/dri:/dev/dri
-        - /dev/video0
-      network_mode: host
-      ipc: host
-      privileged: true # Required for GPU access
-      runtime: nvidia
+  bytetrack:
+    build: ./
+    devices:
+      - /dev/video0:/dev/video0
+    environment:
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - NVIDIA_VISIBLE_DEVICES=nvidia.com/gpu=all
+    volumes:
+      - .:/root/ros2_ws/src
+      - /dev/dri:/dev/dri
+    runtime: nvidia
+    privileged: true
+    tty: true
+    stdin_open: true
+    network_mode: host
+    ipc: host
+    command: tail -f /dev/null
+
+    #TO BE REMOVED LATER ON.
+    #command: /bin/bash -c "source install/setup.bash && ros2 launch yolo_bringup yolo.launch.py input_image_topic:=/image_raw image_reliability:=2 half:=False model:=yolo11n is_compressed:=False"
+    #ros2 run image_publisher image_publisher_node /dev/video0 --ros-args -p publisher_rate:=40.0 -p qos_overrides./image_raw.publisher.depth:=1 -p qos_overrides./image_raw.publisher.reliability:=best_effort
+
+    #ros2 launch yolo_bringup yolo.launch.py input_image_topic:=/image_raw/compressed image_reliability:=2 model:=yolo11n
+
+    #ros2 run image_publisher image_publisher_node /dev/video0 --ros-args -p publisher_rate:=50.0 -p qos_overrides./image_raw.publisher.depth:=1 -p qos_overrides./image_raw.publisher.reliability:=best_effort
