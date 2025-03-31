@@ -119,6 +119,11 @@ def generate_launch_description():
             default_value="False",
             description="Whether to enable class-agnostic Non-Maximum Suppression (NMS) merging overlapping boxes of different classes",
         )
+        is_compressed = LaunchConfiguration("is_compressed")
+        is_compressed_cmd = DeclareLaunchArgument(
+            "is_compressed",
+            default_value="False",
+        )
 
         retina_masks = LaunchConfiguration("retina_masks")
         retina_masks_cmd = DeclareLaunchArgument(
@@ -203,7 +208,7 @@ def generate_launch_description():
         use_debug = LaunchConfiguration("use_debug")
         use_debug_cmd = DeclareLaunchArgument(
             "use_debug",
-            default_value="True",
+            default_value="False",
             description="Whether to activate the debug node",
         )
 
@@ -238,6 +243,7 @@ def generate_launch_description():
                     "max_det": max_det,
                     "augment": augment,
                     "agnostic_nms": agnostic_nms,
+                    "is_compressed": is_compressed,
                     "retina_masks": retina_masks,
                     "image_reliability": image_reliability,
                 }
@@ -304,6 +310,7 @@ def generate_launch_description():
             max_det_cmd,
             augment_cmd,
             agnostic_nms_cmd,
+            is_compressed_cmd,
             retina_masks_cmd,
             input_image_topic_cmd,
             image_reliability_cmd,

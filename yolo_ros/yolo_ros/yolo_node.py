@@ -33,9 +33,9 @@ from ultralytics.engine.results import Results
 from ultralytics.engine.results import Boxes
 from ultralytics.engine.results import Masks
 from ultralytics.engine.results import Keypoints
-
+import numpy as np
 from std_srvs.srv import SetBool
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from yolo_msgs.msg import Point2D
 from yolo_msgs.msg import BoundingBox2D
 from yolo_msgs.msg import Mask
@@ -65,7 +65,7 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("augment", False)
         self.declare_parameter("agnostic_nms", False)
         self.declare_parameter("retina_masks", False)
-
+        self.declare_parameter("is_compressed", False)
         self.declare_parameter("enable", True)
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
 
@@ -101,7 +101,7 @@ class YoloNode(LifecycleNode):
         self.retina_masks = (
             self.get_parameter("retina_masks").get_parameter_value().bool_value
         )
-
+        self.is_compressed = self.get_parameter("is_compressed").get_parameter_value().bool_value
         # ros params
         self.enable = self.get_parameter("enable").get_parameter_value().bool_value
         self.reliability = (
@@ -146,9 +146,8 @@ class YoloNode(LifecycleNode):
                 SetClasses, "set_classes", self.set_classes_cb
             )
 
-        self._sub = self.create_subscription(
-            Image, "image_raw", self.image_cb, self.image_qos_profile
-        )
+        self._sub = self.create_subscription(CompressedImage if self.is_compressed else Image,
+                                             "image_raw", self.image_cb, self.image_qos_profile)
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
@@ -321,15 +320,23 @@ class YoloNode(LifecycleNode):
 
         return keypoints_list
 
-    def image_cb(self, msg: Image) -> None:
+    def image_cb(self, msg) -> None:
 
         if self.enable:
 
             # convert image + predict
-            cv_image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-            cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+            if self.is_compressed:
+                np_arr = np.frombuffer(msg.data, np.uint8)
+                cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                del np_arr
+            else:
+                cv_image = self.cv_bridge.imgmsg_to_cv2(msg, "bgr8")
+                cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+
+            #TODO
             results = self.yolo.track(
                 persist=True,
+                classes=[0,41],
                 source=cv_image,
                 verbose=False,
                 stream=False,

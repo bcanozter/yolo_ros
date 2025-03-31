@@ -33,7 +33,7 @@ import message_filters
 from cv_bridge import CvBridge
 from ultralytics.utils.plotting import Annotator, colors
 
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from yolo_msgs.msg import BoundingBox2D
@@ -52,11 +52,17 @@ class DebugNode(LifecycleNode):
         self.cv_bridge = CvBridge()
 
         # params
+        #Added these input topic parameters for when running debug_node separately.
+        self.declare_parameter("input_image_topic", '/image_raw')
+        self.declare_parameter("input_det_topic", '/yolo/detections')
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
-
+        self.declare_parameter('is_compressed', False)
+        
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
-
+        self.is_compressed = self.get_parameter('is_compressed').get_parameter_value().bool_value
+        self.input_image_topic = self.get_parameter('input_image_topic').get_parameter_value().string_value
+        self.input_det_topic = self.get_parameter('input_det_topic').get_parameter_value().string_value
         self.image_qos_profile = QoSProfile(
             reliability=self.get_parameter("image_reliability")
             .get_parameter_value()
@@ -67,7 +73,7 @@ class DebugNode(LifecycleNode):
         )
 
         # pubs
-        self._dbg_pub = self.create_publisher(Image, "dbg_image", 10)
+        self._dbg_pub = self.create_publisher(Image, "/yolo/dbg_image", self.image_qos_profile)
         self._bb_markers_pub = self.create_publisher(MarkerArray, "dgb_bb_markers", 10)
         self._kp_markers_pub = self.create_publisher(MarkerArray, "dgb_kp_markers", 10)
 
@@ -81,10 +87,11 @@ class DebugNode(LifecycleNode):
 
         # subs
         self.image_sub = message_filters.Subscriber(
-            self, Image, "image_raw", qos_profile=self.image_qos_profile
+            self, CompressedImage if self.is_compressed else Image, 
+            self.input_image_topic, qos_profile=self.image_qos_profile
         )
         self.detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "detections", qos_profile=10
+            self, DetectionArray, self.input_det_topic, qos_profile=10
         )
 
         self._synchronizer = message_filters.ApproximateTimeSynchronizer(
@@ -330,8 +337,13 @@ class DebugNode(LifecycleNode):
 
         return marker
 
-    def detections_cb(self, img_msg: Image, detection_msg: DetectionArray) -> None:
-        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
+    def detections_cb(self, img_msg, detection_msg: DetectionArray) -> None:
+        if self.is_compressed:
+            np_arr = np.frombuffer(img_msg.data, np.uint8)
+            cv_image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        else:
+            cv_image = self.bridge.imgmsg_to_cv2(img_msg, 'bgr8')
+        #cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
         bb_marker_array = MarkerArray()
         kp_marker_array = MarkerArray()
 
