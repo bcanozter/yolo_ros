@@ -1,17 +1,21 @@
 version: '3.8'
 
 services:
-  bytetrack:
-    build: ./
-    devices:
-      - /dev/video0:/dev/video0
-    environment:
-      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-    volumes:
-      - .:/root/ros2_ws/src
-    privileged: true
-    tty: true
-    stdin_open: true
-    network_mode: host
-    ipc: host
-    command: tail -f /dev/null
+    cuda:
+      build:
+        context: .
+      command: tail -f /dev/null
+      environment:
+        RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+        NVIDIA_VISIBLE_DEVICES: nvidia.com/gpu=all
+      volumes:
+        - .:/root/ros2_ws/src
+        - /dev/dri:/dev/dri
+      devices:
+        # Provide access to GPU devices (supports non-NVIDIA GPUs)
+        - /dev/dri:/dev/dri
+        - /dev/video0
+      network_mode: host
+      ipc: host
+      privileged: true # Required for GPU access
+      runtime: nvidia
