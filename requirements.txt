@@ -5,3 +5,4 @@ ultralytics==8.3.91
 lap==0.5.12
 empy==3.3.4
 lark==1.2.2
+torchvision==0.21.0
