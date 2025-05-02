@@ -288,11 +288,18 @@ def generate_launch_description():
             executable="debug_node",
             name="debug_node",
             namespace=namespace,
-            parameters=[{"image_reliability": image_reliability, "is_compressed": is_compressed}],
-            remappings=[
-                ("image_raw", input_image_topic),
-                ("detections", debug_detections_topic),
+            parameters=[
+                {
+                    "image_reliability": image_reliability,
+                    "input_image_topic": input_image_topic,
+                    "is_compressed": is_compressed,
+                    "input_det_topic": debug_detections_topic,
+                }
             ],
+            # remappings=[
+            #     ("image_raw", input_image_topic),
+            #     ("detections", debug_detections_topic),
+            # ],
             condition=IfCondition(PythonExpression([use_debug])),
         )
 
