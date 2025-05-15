@@ -133,11 +133,12 @@ class YoloNode(LifecycleNode):
             self.get_logger().error(f"Model file '{self.model}' does not exists")
             return TransitionCallbackReturn.ERROR
 
-        # try:
-        #     self.get_logger().info("Trying to fuse model...")
-        #     self.yolo.fuse()
-        # except TypeError as e:
-        #     self.get_logger().warn(f"Error while fuse: {e}")
+        if self.model.endswith('.engine') is False:
+            try:
+                self.get_logger().info("Trying to fuse model...")
+                self.yolo.fuse()
+            except TypeError as e:
+                self.get_logger().warn(f"Error while fuse: {e}")
 
         self._enable_srv = self.create_service(SetBool, "enable", self.enable_cb)
 
@@ -334,7 +335,7 @@ class YoloNode(LifecycleNode):
                 cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
             results = self.yolo.track(
                 persist=True,
-                classes=[0,41],
+                #classes=[0,41],
                 source=cv_image,
                 verbose=False,
                 stream=False,
