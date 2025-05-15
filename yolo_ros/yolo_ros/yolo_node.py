@@ -378,7 +378,8 @@ class YoloNode(LifecycleNode):
             del cv_image
 
     def run_lp_model(self, image, detections_msg):
-        lp_results = self.lp_model(
+        lp_results = self.lp_model.track(
+            persist=True,
             source=image,
             verbose=False,
             stream=False,
