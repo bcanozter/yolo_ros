@@ -75,38 +75,24 @@ class YoloNode(LifecycleNode):
         self.get_logger().info(f"[{self.get_name()}] Configuring...")
 
         # model params
-        self.model_type = (
-            self.get_parameter("model_type").get_parameter_value().string_value
-        )
+        self.model_type = self.get_parameter("model_type").get_parameter_value().string_value
         self.model = self.get_parameter("model").get_parameter_value().string_value
         self.device = self.get_parameter("device").get_parameter_value().string_value
 
         # inference params
-        self.threshold = (
-            self.get_parameter("threshold").get_parameter_value().double_value
-        )
+        self.threshold = self.get_parameter("threshold").get_parameter_value().double_value
         self.iou = self.get_parameter("iou").get_parameter_value().double_value
-        self.imgsz_height = (
-            self.get_parameter("imgsz_height").get_parameter_value().integer_value
-        )
-        self.imgsz_width = (
-            self.get_parameter("imgsz_width").get_parameter_value().integer_value
-        )
+        self.imgsz_height = self.get_parameter("imgsz_height").get_parameter_value().integer_value
+        self.imgsz_width = self.get_parameter("imgsz_width").get_parameter_value().integer_value
         self.half = self.get_parameter("half").get_parameter_value().bool_value
         self.max_det = self.get_parameter("max_det").get_parameter_value().integer_value
         self.augment = self.get_parameter("augment").get_parameter_value().bool_value
-        self.agnostic_nms = (
-            self.get_parameter("agnostic_nms").get_parameter_value().bool_value
-        )
-        self.retina_masks = (
-            self.get_parameter("retina_masks").get_parameter_value().bool_value
-        )
+        self.agnostic_nms = self.get_parameter("agnostic_nms").get_parameter_value().bool_value
+        self.retina_masks = self.get_parameter("retina_masks").get_parameter_value().bool_value
         self.is_compressed = self.get_parameter("is_compressed").get_parameter_value().bool_value
         # ros params
         self.enable = self.get_parameter("enable").get_parameter_value().bool_value
-        self.reliability = (
-            self.get_parameter("image_reliability").get_parameter_value().integer_value
-        )
+        self.reliability = self.get_parameter("image_reliability").get_parameter_value().integer_value
 
         # detection pub
         self.image_qos_profile = QoSProfile(
@@ -129,11 +115,12 @@ class YoloNode(LifecycleNode):
 
         try:
             self.yolo = self.type_to_model[self.model_type](self.model)
+            self.lp_model = YOLO("/root/ros2_ws/src/license.engine")  # TODO
         except FileNotFoundError:
             self.get_logger().error(f"Model file '{self.model}' does not exists")
             return TransitionCallbackReturn.ERROR
 
-        if self.model.endswith('.engine') is False:
+        if self.model.endswith(".engine") is False:
             try:
                 self.get_logger().info("Trying to fuse model...")
                 self.yolo.fuse()
@@ -143,12 +130,11 @@ class YoloNode(LifecycleNode):
         self._enable_srv = self.create_service(SetBool, "enable", self.enable_cb)
 
         if isinstance(self.yolo, YOLOWorld):
-            self._set_classes_srv = self.create_service(
-                SetClasses, "set_classes", self.set_classes_cb
-            )
+            self._set_classes_srv = self.create_service(SetClasses, "set_classes", self.set_classes_cb)
 
-        self._sub = self.create_subscription(CompressedImage if self.is_compressed else Image,
-                                             "image_raw", self.image_cb, self.image_qos_profile)
+        self._sub = self.create_subscription(
+            CompressedImage if self.is_compressed else Image, "image_raw", self.image_cb, self.image_qos_profile
+        )
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
@@ -205,7 +191,7 @@ class YoloNode(LifecycleNode):
         response.success = True
         return response
 
-    def parse_hypothesis(self, results: Results) -> List[Dict]:
+    def parse_hypothesis(self, model, results: Results) -> List[Dict]:
 
         hypothesis_list = []
 
@@ -214,7 +200,7 @@ class YoloNode(LifecycleNode):
             for box_data in results.boxes:
                 hypothesis = {
                     "class_id": int(box_data.cls),
-                    "class_name": self.yolo.names[int(box_data.cls)],
+                    "class_name": model.names[int(box_data.cls)],
                     "score": float(box_data.conf),
                 }
                 hypothesis_list.append(hypothesis)
@@ -223,7 +209,7 @@ class YoloNode(LifecycleNode):
             for i in range(results.obb.cls.shape[0]):
                 hypothesis = {
                     "class_id": int(results.obb.cls[i]),
-                    "class_name": self.yolo.names[int(results.obb.cls[i])],
+                    "class_name": model.names[int(results.obb.cls[i])],
                     "score": float(results.obb.conf[i]),
                 }
                 hypothesis_list.append(hypothesis)
@@ -282,10 +268,7 @@ class YoloNode(LifecycleNode):
 
             msg = Mask()
 
-            msg.data = [
-                create_point2d(float(ele[0]), float(ele[1]))
-                for ele in mask.xy[0].tolist()
-            ]
+            msg.data = [create_point2d(float(ele[0]), float(ele[1])) for ele in mask.xy[0].tolist()]
             msg.height = results.orig_img.shape[0]
             msg.width = results.orig_img.shape[1]
 
@@ -335,7 +318,7 @@ class YoloNode(LifecycleNode):
                 cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
             results = self.yolo.track(
                 persist=True,
-                #classes=[0,41],
+                # classes=[0,41],
                 source=cv_image,
                 verbose=False,
                 stream=False,
@@ -352,7 +335,7 @@ class YoloNode(LifecycleNode):
             results: Results = results[0].cpu()
 
             if results.boxes or results.obb:
-                hypothesis = self.parse_hypothesis(results)
+                hypothesis = self.parse_hypothesis(self.yolo, results)
                 boxes = self.parse_boxes(results)
 
             if results.masks:
@@ -369,6 +352,10 @@ class YoloNode(LifecycleNode):
                 aux_msg = Detection()
 
                 if results.boxes or results.obb and hypothesis and boxes:
+                    #CHeck if it is a vehicle class [2,3,5]
+                    if hypothesis[i]["class_id"] in [2,3,5] and hypothesis[i]["score"] > self.threshold:
+                        #lp_image = self.crop_image_from_bbox(cv_image=cv_image,box=boxes[i])
+                        self.run_lp_model(cv_image,detections_msg)
                     aux_msg.class_id = hypothesis[i]["class_id"]
                     aux_msg.class_name = hypothesis[i]["class_name"]
                     aux_msg.score = hypothesis[i]["score"]
@@ -389,6 +376,67 @@ class YoloNode(LifecycleNode):
 
             del results
             del cv_image
+
+    def run_lp_model(self, image, detections_msg):
+        lp_results = self.lp_model(
+            source=image,
+            verbose=False,
+            stream=False,
+            conf=self.threshold,
+            iou=self.iou,
+            imgsz=(self.imgsz_height, self.imgsz_width),
+            half=self.half,
+            max_det=self.max_det,
+            augment=self.augment,
+            agnostic_nms=self.agnostic_nms,
+            retina_masks=self.retina_masks,
+            device=self.device,
+        )
+        lp_results: Results = lp_results[0].cpu()
+        if lp_results.boxes or lp_results.obb:
+            lp_hypothesis = self.parse_hypothesis(self.lp_model, lp_results)
+            lp_boxes = self.parse_boxes(lp_results)
+        if lp_results.masks:
+            lp_masks = self.parse_masks(lp_results)
+        if lp_results.keypoints:
+            lp_keypoints = self.parse_keypoints(lp_results)
+        for i in range(len(lp_results)):
+            aux_msg = Detection()
+            if lp_results.boxes or lp_results.obb and lp_hypothesis and lp_boxes:
+                aux_msg.class_id = lp_hypothesis[i]["class_id"]
+                aux_msg.class_name = lp_hypothesis[i]["class_name"]
+                aux_msg.score = lp_hypothesis[i]["score"]
+                aux_msg.bbox = lp_boxes[i]
+
+            if lp_results.masks and lp_masks:
+                aux_msg.mask = lp_masks[i]
+
+            if lp_results.keypoints and lp_keypoints:
+                aux_msg.keypoints = lp_keypoints[i]
+
+            detections_msg.detections.append(aux_msg)
+        del lp_results
+
+    def crop_image_from_bbox(self, cv_image, box):
+        center_x = box.center.position.x
+        center_y = box.center.position.y
+        width = box.size.x
+        height = box.size.y
+
+        # Calculate corner coordinates
+        x1 = int(center_x - width / 2)
+        y1 = int(center_y - height / 2)
+        x2 = int(center_x + width / 2)
+        y2 = int(center_y + height / 2)
+
+        padding = 20
+        h, w = cv_image.shape[:2]
+        x1 = max(0, x1 - padding)
+        y1 = max(0, y1 - padding)
+        x2 = min(w, x2 + padding)
+        y2 = min(h, y2 + padding)
+
+        return cv_image[y1:y2, x1:x2]
 
     def set_classes_cb(
         self,
