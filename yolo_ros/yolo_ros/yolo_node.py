@@ -15,7 +15,6 @@
 
 
 import cv2
-from typing import List, Dict
 from cv_bridge import CvBridge
 
 import rclpy
@@ -30,20 +29,13 @@ from rclpy.lifecycle import LifecycleState
 import torch
 from ultralytics import YOLO, YOLOWorld
 from ultralytics.engine.results import Results
-from ultralytics.engine.results import Boxes
-from ultralytics.engine.results import Masks
-from ultralytics.engine.results import Keypoints
 import numpy as np
 from std_srvs.srv import SetBool
 from sensor_msgs.msg import Image, CompressedImage
-from yolo_msgs.msg import Point2D
-from yolo_msgs.msg import BoundingBox2D
-from yolo_msgs.msg import Mask
-from yolo_msgs.msg import KeyPoint2D
-from yolo_msgs.msg import KeyPoint2DArray
 from yolo_msgs.msg import Detection
 from yolo_msgs.msg import DetectionArray
 from yolo_msgs.srv import SetClasses
+from .utils import *
 
 
 class YoloNode(LifecycleNode):
@@ -103,6 +95,7 @@ class YoloNode(LifecycleNode):
         )
 
         self._pub = self.create_lifecycle_publisher(DetectionArray, "detections", 10)
+        self._lp_pub = self.create_publisher(CompressedImage, "/lp_image/compressed", self.image_qos_profile)
         self.cv_bridge = CvBridge()
 
         super().on_configure(state)
@@ -191,119 +184,6 @@ class YoloNode(LifecycleNode):
         response.success = True
         return response
 
-    def parse_hypothesis(self, model, results: Results) -> List[Dict]:
-
-        hypothesis_list = []
-
-        if results.boxes:
-            box_data: Boxes
-            for box_data in results.boxes:
-                hypothesis = {
-                    "class_id": int(box_data.cls),
-                    "class_name": model.names[int(box_data.cls)],
-                    "score": float(box_data.conf),
-                }
-                hypothesis_list.append(hypothesis)
-
-        elif results.obb:
-            for i in range(results.obb.cls.shape[0]):
-                hypothesis = {
-                    "class_id": int(results.obb.cls[i]),
-                    "class_name": model.names[int(results.obb.cls[i])],
-                    "score": float(results.obb.conf[i]),
-                }
-                hypothesis_list.append(hypothesis)
-
-        return hypothesis_list
-
-    def parse_boxes(self, results: Results) -> List[BoundingBox2D]:
-
-        boxes_list = []
-
-        if results.boxes:
-            box_data: Boxes
-            for box_data in results.boxes:
-
-                msg = BoundingBox2D()
-
-                # get boxes values
-                box = box_data.xywh[0]
-                msg.center.position.x = float(box[0])
-                msg.center.position.y = float(box[1])
-                msg.size.x = float(box[2])
-                msg.size.y = float(box[3])
-
-                # append msg
-                boxes_list.append(msg)
-
-        elif results.obb:
-            for i in range(results.obb.cls.shape[0]):
-                msg = BoundingBox2D()
-
-                # get boxes values
-                box = results.obb.xywhr[i]
-                msg.center.position.x = float(box[0])
-                msg.center.position.y = float(box[1])
-                msg.center.theta = float(box[4])
-                msg.size.x = float(box[2])
-                msg.size.y = float(box[3])
-
-                # append msg
-                boxes_list.append(msg)
-
-        return boxes_list
-
-    def parse_masks(self, results: Results) -> List[Mask]:
-
-        masks_list = []
-
-        def create_point2d(x: float, y: float) -> Point2D:
-            p = Point2D()
-            p.x = x
-            p.y = y
-            return p
-
-        mask: Masks
-        for mask in results.masks:
-
-            msg = Mask()
-
-            msg.data = [create_point2d(float(ele[0]), float(ele[1])) for ele in mask.xy[0].tolist()]
-            msg.height = results.orig_img.shape[0]
-            msg.width = results.orig_img.shape[1]
-
-            masks_list.append(msg)
-
-        return masks_list
-
-    def parse_keypoints(self, results: Results) -> List[KeyPoint2DArray]:
-
-        keypoints_list = []
-
-        points: Keypoints
-        for points in results.keypoints:
-
-            msg_array = KeyPoint2DArray()
-
-            if points.conf is None:
-                continue
-
-            for kp_id, (p, conf) in enumerate(zip(points.xy[0], points.conf[0])):
-
-                if conf >= self.threshold:
-                    msg = KeyPoint2D()
-
-                    msg.id = kp_id + 1
-                    msg.point.x = float(p[0])
-                    msg.point.y = float(p[1])
-                    msg.score = float(conf)
-
-                    msg_array.data.append(msg)
-
-            keypoints_list.append(msg_array)
-
-        return keypoints_list
-
     def image_cb(self, msg) -> None:
 
         if self.enable:
@@ -335,14 +215,14 @@ class YoloNode(LifecycleNode):
             results: Results = results[0].cpu()
 
             if results.boxes or results.obb:
-                hypothesis = self.parse_hypothesis(self.yolo, results)
-                boxes = self.parse_boxes(results)
+                hypothesis = parse_hypothesis(self.yolo, results)
+                boxes = parse_boxes(results)
 
             if results.masks:
-                masks = self.parse_masks(results)
+                masks = parse_masks(results)
 
             if results.keypoints:
-                keypoints = self.parse_keypoints(results)
+                keypoints = parse_keypoints(self.threshold, results)
 
             # create detection msgs
             detections_msg = DetectionArray()
@@ -352,10 +232,11 @@ class YoloNode(LifecycleNode):
                 aux_msg = Detection()
 
                 if results.boxes or results.obb and hypothesis and boxes:
-                    #CHeck if it is a vehicle class [2,3,5]
-                    if hypothesis[i]["class_id"] in [2,3,5] and hypothesis[i]["score"] > self.threshold:
-                        #lp_image = self.crop_image_from_bbox(cv_image=cv_image,box=boxes[i])
-                        self.run_lp_model(cv_image,detections_msg)
+                    # CHeck if it is a vehicle class [2,3,5]
+                    if hypothesis[i]["class_id"] in [2, 3, 5]:
+                        img = crop_image_from_bbox(cv_image, boxes[i])
+                        self._lp_pub.publish(self.cv_bridge.cv2_to_compressed_imgmsg(img))
+                        del img
                     aux_msg.class_id = hypothesis[i]["class_id"]
                     aux_msg.class_name = hypothesis[i]["class_name"]
                     aux_msg.score = hypothesis[i]["score"]
@@ -376,68 +257,6 @@ class YoloNode(LifecycleNode):
 
             del results
             del cv_image
-
-    def run_lp_model(self, image, detections_msg):
-        lp_results = self.lp_model.track(
-            persist=True,
-            source=image,
-            verbose=False,
-            stream=False,
-            conf=self.threshold,
-            iou=self.iou,
-            imgsz=(self.imgsz_height, self.imgsz_width),
-            half=self.half,
-            max_det=self.max_det,
-            augment=self.augment,
-            agnostic_nms=self.agnostic_nms,
-            retina_masks=self.retina_masks,
-            device=self.device,
-        )
-        lp_results: Results = lp_results[0].cpu()
-        if lp_results.boxes or lp_results.obb:
-            lp_hypothesis = self.parse_hypothesis(self.lp_model, lp_results)
-            lp_boxes = self.parse_boxes(lp_results)
-        if lp_results.masks:
-            lp_masks = self.parse_masks(lp_results)
-        if lp_results.keypoints:
-            lp_keypoints = self.parse_keypoints(lp_results)
-        for i in range(len(lp_results)):
-            aux_msg = Detection()
-            if lp_results.boxes or lp_results.obb and lp_hypothesis and lp_boxes:
-                aux_msg.class_id = lp_hypothesis[i]["class_id"]
-                aux_msg.class_name = lp_hypothesis[i]["class_name"]
-                aux_msg.score = lp_hypothesis[i]["score"]
-                aux_msg.bbox = lp_boxes[i]
-
-            if lp_results.masks and lp_masks:
-                aux_msg.mask = lp_masks[i]
-
-            if lp_results.keypoints and lp_keypoints:
-                aux_msg.keypoints = lp_keypoints[i]
-
-            detections_msg.detections.append(aux_msg)
-        del lp_results
-
-    def crop_image_from_bbox(self, cv_image, box):
-        center_x = box.center.position.x
-        center_y = box.center.position.y
-        width = box.size.x
-        height = box.size.y
-
-        # Calculate corner coordinates
-        x1 = int(center_x - width / 2)
-        y1 = int(center_y - height / 2)
-        x2 = int(center_x + width / 2)
-        y2 = int(center_y + height / 2)
-
-        padding = 20
-        h, w = cv_image.shape[:2]
-        x1 = max(0, x1 - padding)
-        y1 = max(0, y1 - padding)
-        x2 = min(w, x2 + padding)
-        y2 = min(h, y2 + padding)
-
-        return cv_image[y1:y2, x1:x2]
 
     def set_classes_cb(
         self,

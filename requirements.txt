@@ -9,3 +9,4 @@ torchvision==0.21.0
 onnxruntime-gpu==1.22.0
 onnx==1.17.0
 onnxslim==0.1.50
+paddleocr==2.10.0

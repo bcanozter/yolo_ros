@@ -302,6 +302,14 @@ def generate_launch_description():
             # ],
             condition=IfCondition(PythonExpression([use_debug])),
         )
+        use_lp = LaunchConfiguration("use_lp")
+        lp_node_cmd = Node(
+            package="yolo_ros",
+            executable="lp_node",
+            name="lp_node",
+            namespace=namespace,
+            condition=IfCondition(PythonExpression([use_lp])),
+        )
 
         return (
             model_type_cmd,
@@ -334,6 +342,7 @@ def generate_launch_description():
             tracking_node_cmd,
             detect_3d_node_cmd,
             debug_node_cmd,
+            lp_node_cmd,
         )
 
     use_tracking = LaunchConfiguration("use_tracking")
